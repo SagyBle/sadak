@@ -101,6 +101,28 @@ class DashboardMongoDBService extends MongoDBAbstractService {
       .lean();
   }
 
+  public async updateScheduleEvent(
+    id: string,
+    departmentId: string,
+    data: Partial<
+      Omit<ScheduleEvent, "_id" | "createdAt" | "updatedAt" | "department">
+    >
+  ) {
+    return this.ScheduleEvent.findOneAndUpdate(
+      { _id: id, department: departmentId },
+      data,
+      { new: true }
+    ).lean();
+  }
+
+  public async deleteScheduleEvent(id: string, departmentId: string) {
+    const deleted = await this.ScheduleEvent.findOneAndDelete({
+      _id: id,
+      department: departmentId,
+    });
+    return deleted !== null;
+  }
+
   public async createLeaveRequest(
     data: Omit<LeaveRequest, "_id" | "createdAt" | "updatedAt">
   ) {

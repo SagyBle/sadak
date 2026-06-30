@@ -6,6 +6,17 @@ class HrFrontendService {
     return ApiService.get<{ summary: any }>(`/personnel/summary${query}`);
   }
 
+  static getDailyStatus(date?: string) {
+    const query = date ? `?date=${encodeURIComponent(date)}` : "";
+    return ApiService.get<{
+      date: string;
+      summary: any;
+      inBase: any[];
+      home: any[];
+      notEnlisted: any[];
+    }>(`/personnel/daily-status${query}`);
+  }
+
   static getRoster() {
     return ApiService.get<{ roster: any[] }>("/personnel/roster");
   }
@@ -28,6 +39,14 @@ class HrFrontendService {
 
   static createSchedule(payload: any) {
     return ApiService.post<{ schedule: any }>("/schedules", payload);
+  }
+
+  static updateSchedule(payload: any) {
+    return ApiService.patch<{ schedule: any }>("/schedules", payload);
+  }
+
+  static deleteSchedule(id: string) {
+    return ApiService.delete<{ id: string }>("/schedules", { id });
   }
 
   static getLeaveRequests() {

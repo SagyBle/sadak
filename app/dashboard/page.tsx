@@ -26,7 +26,7 @@ import {
 } from "@/app/lib/hr.constants";
 import { he } from "date-fns/locale";
 
-type TabKey = "personnel" | "schedule" | "leave" | "duties";
+type TabKey = "dailyStatus" | "personnel" | "schedule" | "leave" | "duties";
 type LeaveApprovalDayIntel = {
   date: string;
   requiredPersonnel: number;
@@ -34,8 +34,43 @@ type LeaveApprovalDayIntel = {
   openRequests: number;
   warning: boolean;
 };
+type DailyStatusItem = {
+  id: string;
+  name: string;
+  role: string;
+  isPresent: boolean;
+  statusText: string;
+  reason: string;
+  source: "BASELINE" | "LEAVE" | "STAY_BEHIND" | "OVERRIDE";
+  isException: boolean;
+};
+type DailyStatusResponse = {
+  date: string;
+  summary: {
+    totalDepartmentUsers: number;
+    inBaseCount: number;
+    homeCount: number;
+    notEnlistedCount: number;
+    exceptionsCount: number;
+    pendingLeaveCount: number;
+    totalRequired: number;
+    availableNow: number;
+    hasActiveSchedule: boolean;
+  };
+  inBase: DailyStatusItem[];
+  home: DailyStatusItem[];
+  notEnlisted: DailyStatusItem[];
+};
+
+const getTodayDateInputValue = () => new Date().toISOString().slice(0, 10);
+const getDateInputValueFromOffset = (offsetDays: number) => {
+  const targetDate = new Date();
+  targetDate.setDate(targetDate.getDate() + offsetDays);
+  return targetDate.toISOString().slice(0, 10);
+};
 
 const TAB_OPTIONS: Array<{ key: TabKey; label: string }> = [
+  { key: "dailyStatus", label: "סטטוס יומי" },
   { key: "personnel", label: HEBREW_TABS.PERSONNEL },
   { key: "schedule", label: HEBREW_TABS.SCHEDULE },
   { key: "leave", label: HEBREW_TABS.LEAVE },
@@ -45,8 +80,17 @@ const TAB_OPTIONS: Array<{ key: TabKey; label: string }> = [
 export default function DashboardPage() {
   const router = useRouter();
   const { session, isLoading, isGodMode, logout } = useAuth();
-  const [tab, setTab] = useState<TabKey>("personnel");
+  const [tab, setTab] = useState<TabKey>("dailyStatus");
   const [summary, setSummary] = useState<any>(null);
+  const [dailyStatusDate, setDailyStatusDate] = useState(
+    getTodayDateInputValue()
+  );
+  const [dailyStatus, setDailyStatus] = useState<DailyStatusResponse | null>(
+    null
+  );
+  const todayDate = getDateInputValueFromOffset(0);
+  const tomorrowDate = getDateInputValueFromOffset(1);
+  const dayAfterTomorrowDate = getDateInputValueFromOffset(2);
   const [roster, setRoster] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [schedules, setSchedules] = useState<any[]>([]);
@@ -82,12 +126,28 @@ export default function DashboardPage() {
     dutyType: "KITCHEN",
     notes: "",
   });
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null);
+  const [editingSchedule, setEditingSchedule] = useState({
+    startDate: "",
+    endDate: "",
+    activityType: "TRAINING",
+    requiredPersonnelCount: 0,
+    scope: "ALL_DEPARTMENT" as "ALL_DEPARTMENT" | "SPECIFIC_USERS",
+    selectedUsers: [] as string[],
+    notes: "",
+  });
 
   const isCommander = session?.role === "COMMANDER";
-  const soldiers = useMemo(
-    () => users.filter((user) => user.role === "SOLDIER"),
+  const schedulableUsers = useMemo(
+    () => users.filter((user) => user.role === "SOLDIER" || user.role === "COMMANDER"),
     [users]
   );
+  const sourceHebrew: Record<DailyStatusItem["source"], string> = {
+    BASELINE: "לו״ז בסיסי",
+    LEAVE: "חופשה מאושרת",
+    STAY_BEHIND: "הישארות חריגה",
+    OVERRIDE: "חריג מפקד",
+  };
 
   const loadAll = async () => {
     const [summaryRes, rosterRes, usersRes, schedulesRes, leaveRes, dutiesRes] =
@@ -108,6 +168,15 @@ export default function DashboardPage() {
     if (dutiesRes.success) setDuties(dutiesRes.data?.logs || []);
   };
 
+  const loadDailyStatus = async (date: string) => {
+    const response = await HrFrontendService.getDailyStatus(date);
+    if (!response.success) {
+      toast.error(response.error || "טעינת סטטוס יומי נכשלה");
+      return;
+    }
+    setDailyStatus(response.data || null);
+  };
+
   useEffect(() => {
     if (isLoading) return;
     if (!session) {
@@ -119,7 +188,14 @@ export default function DashboardPage() {
       return;
     }
     loadAll();
+    loadDailyStatus(dailyStatusDate);
   }, [isLoading, session, isGodMode, router]);
+
+  useEffect(() => {
+    if (!session || isGodMode) return;
+    if (tab !== "dailyStatus") return;
+    loadDailyStatus(dailyStatusDate);
+  }, [dailyStatusDate, tab, session, isGodMode]);
 
   const weeklyOutlook = useMemo(() => {
     const today = new Date();
@@ -272,7 +348,7 @@ export default function DashboardPage() {
       newSchedule.scope === "SPECIFIC_USERS" &&
       newSchedule.selectedUsers.length === 0
     ) {
-      toast.error("בבחירת חיילים ספציפיים חובה לבחור לפחות חייל אחד");
+      toast.error("בבחירת משתמשים ספציפיים חובה לבחור לפחות איש מחלקה אחד");
       return;
     }
 
@@ -291,6 +367,75 @@ export default function DashboardPage() {
       selectedUsers: [],
       notes: "",
     });
+    loadAll();
+  };
+
+  const startEditSchedule = (schedule: any) => {
+    setEditingScheduleId(String(schedule._id));
+    setEditingSchedule({
+      startDate: new Date(schedule.startDate).toISOString().slice(0, 10),
+      endDate: new Date(schedule.endDate).toISOString().slice(0, 10),
+      activityType: schedule.activityType,
+      requiredPersonnelCount: Number(schedule.requiredPersonnelCount || 0),
+      scope: schedule.scope || "ALL_DEPARTMENT",
+      selectedUsers:
+        schedule.scope === "SPECIFIC_USERS"
+          ? (schedule.selectedUsers || []).map((id: any) => String(id))
+          : [],
+      notes: schedule.notes || "",
+    });
+  };
+
+  const cancelEditSchedule = () => {
+    setEditingScheduleId(null);
+    setEditingSchedule({
+      startDate: "",
+      endDate: "",
+      activityType: "TRAINING",
+      requiredPersonnelCount: 0,
+      scope: "ALL_DEPARTMENT",
+      selectedUsers: [],
+      notes: "",
+    });
+  };
+
+  const saveEditSchedule = async (scheduleId: string) => {
+    if (
+      editingSchedule.scope === "SPECIFIC_USERS" &&
+      editingSchedule.selectedUsers.length === 0
+    ) {
+      toast.error("בעריכה עם משתמשים ספציפיים חובה לבחור לפחות איש מחלקה אחד");
+      return;
+    }
+
+    const response = await HrFrontendService.updateSchedule({
+      id: scheduleId,
+      ...editingSchedule,
+    });
+    if (!response.success) {
+      toast.error(response.error || "עדכון אירוע לו״ז נכשל");
+      return;
+    }
+
+    toast.success("אירוע לו״ז עודכן");
+    cancelEditSchedule();
+    loadAll();
+  };
+
+  const removeSchedule = async (scheduleId: string) => {
+    const shouldDelete = window.confirm("למחוק את אירוע הלו״ז הזה?");
+    if (!shouldDelete) return;
+
+    const response = await HrFrontendService.deleteSchedule(scheduleId);
+    if (!response.success) {
+      toast.error(response.error || "מחיקת אירוע לו״ז נכשלה");
+      return;
+    }
+
+    toast.success("אירוע לו״ז נמחק");
+    if (editingScheduleId === scheduleId) {
+      cancelEditSchedule();
+    }
     loadAll();
   };
 
@@ -380,6 +525,181 @@ export default function DashboardPage() {
             </Button>
           ))}
         </div>
+
+        {tab === "dailyStatus" && (
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>סטטוס יומי מחלקתי</CardTitle>
+                <CardDescription>
+                  תמונת מצב לתאריך הנבחר: מי אמור להיות בצבא ומי אמור להיות בבית
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-col gap-2 md:flex-row md:items-end">
+                  <div className="w-full max-w-xs">
+                    <Label htmlFor="dailyStatusDate">תאריך</Label>
+                    <Input
+                      id="dailyStatusDate"
+                      type="date"
+                      value={dailyStatusDate}
+                      onChange={(e) => setDailyStatusDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant={dailyStatusDate === todayDate ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setDailyStatusDate(todayDate)}
+                    >
+                      היום
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={dailyStatusDate === tomorrowDate ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setDailyStatusDate(tomorrowDate)}
+                    >
+                      מחר
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={
+                        dailyStatusDate === dayAfterTomorrowDate
+                          ? "default"
+                          : "outline"
+                      }
+                      size="sm"
+                      onClick={() => setDailyStatusDate(dayAfterTomorrowDate)}
+                    >
+                      מחרתיים
+                    </Button>
+                  </div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-4 text-sm">
+                  <div className="rounded border bg-white p-3">
+                    סה״כ חיילים במחלקה: {dailyStatus?.summary.totalDepartmentUsers ?? 0}
+                  </div>
+                  <div className="rounded border bg-green-50 p-3">
+                    אמורים בצבא: {dailyStatus?.summary.inBaseCount ?? 0}
+                  </div>
+                  <div className="rounded border bg-blue-50 p-3">
+                    אמורים בבית: {dailyStatus?.summary.homeCount ?? 0}
+                  </div>
+                  <div className="rounded border bg-slate-100 p-3">
+                    לא מגוייסים: {dailyStatus?.summary.notEnlistedCount ?? 0}
+                  </div>
+                  <div className="rounded border bg-amber-50 p-3">
+                    חריגים יומיים: {dailyStatus?.summary.exceptionsCount ?? 0}
+                  </div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3 text-sm">
+                  <div className="rounded border bg-white p-3">
+                    סד״כ נדרש היום: {dailyStatus?.summary.totalRequired ?? 0}
+                  </div>
+                  <div className="rounded border bg-white p-3">
+                    זמינים כרגע: {dailyStatus?.summary.availableNow ?? 0}
+                  </div>
+                  <div className="rounded border bg-white p-3">
+                    בקשות ממתינות להיום: {dailyStatus?.summary.pendingLeaveCount ?? 0}
+                  </div>
+                </div>
+                {dailyStatus?.summary.hasActiveSchedule === false && (
+                  <div className="rounded border border-slate-300 bg-slate-50 p-3 text-sm">
+                    אין הגדרת לו״ז ליום זה - כלל החיילים מסומנים כ״לא מגוייסים״.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <Card>
+                <CardHeader>
+                  <CardTitle>אמורים להיות בצבא</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {(dailyStatus?.inBase || []).length === 0 ? (
+                    <div className="rounded border bg-white p-3 text-sm text-muted-foreground">
+                      אין חיילים משובצים כעת לצבא בתאריך זה
+                    </div>
+                  ) : (
+                    (dailyStatus?.inBase || []).map((item) => (
+                      <div
+                        key={item.id}
+                        className="rounded border bg-white p-3 text-sm"
+                      >
+                        <div className="font-medium">{item.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          מקור: {sourceHebrew[item.source]}
+                        </div>
+                        {item.isException && (
+                          <div className="mt-1 inline-block rounded bg-amber-100 px-2 py-1 text-xs">
+                            חריג
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>אמורים להיות בבית</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {(dailyStatus?.home || []).length === 0 ? (
+                    <div className="rounded border bg-white p-3 text-sm text-muted-foreground">
+                      אין חיילים משובצים לבית בתאריך זה
+                    </div>
+                  ) : (
+                    (dailyStatus?.home || []).map((item) => (
+                      <div
+                        key={item.id}
+                        className="rounded border bg-white p-3 text-sm"
+                      >
+                        <div className="font-medium">{item.name}</div>
+                        <div className="text-xs">
+                          סיבה: {item.reason}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          מקור: {sourceHebrew[item.source]}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>לא מגוייסים</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {(dailyStatus?.notEnlisted || []).length === 0 ? (
+                    <div className="rounded border bg-white p-3 text-sm text-muted-foreground">
+                      קיימת הגדרת לו״ז לתאריך זה
+                    </div>
+                  ) : (
+                    (dailyStatus?.notEnlisted || []).map((item) => (
+                      <div
+                        key={item.id}
+                        className="rounded border bg-white p-3 text-sm"
+                      >
+                        <div className="font-medium">{item.name}</div>
+                        <div className="text-xs">סיבה: {item.reason}</div>
+                        <div className="text-xs text-muted-foreground">
+                          סטטוס: {item.statusText}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
 
         {tab === "personnel" && (
           <div className="space-y-4">
@@ -504,23 +824,177 @@ export default function DashboardPage() {
               <CardContent className="space-y-2 text-sm">
                 {schedules.map((event) => (
                   <div key={event._id} className="rounded border bg-white p-3">
-                    <div className="font-medium">
-                      {ACTIVITY_TYPE_HEBREW[event.activityType as keyof typeof ACTIVITY_TYPE_HEBREW]}
-                    </div>
-                    <div>
-                      {new Date(event.startDate).toLocaleDateString("he-IL")} -{" "}
-                      {new Date(event.endDate).toLocaleDateString("he-IL")}
-                    </div>
-                    <div>נדרש: {event.requiredPersonnelCount}</div>
-                    <div>היקף: {event.scope === "ALL_DEPARTMENT" ? "כל המחלקה" : "נבחרים בלבד"}</div>
-                    {event.scope === "SPECIFIC_USERS" && (
-                      <div className="text-xs text-muted-foreground">
-                        חל על{" "}
-                        {Array.isArray(event.selectedUsers)
-                          ? event.selectedUsers.length
-                          : 0}{" "}
-                        חיילים
+                    {editingScheduleId === String(event._id) ? (
+                      <div className="space-y-3">
+                        <div className="grid gap-3 md:grid-cols-3">
+                          <Input
+                            type="date"
+                            value={editingSchedule.startDate}
+                            onChange={(e) =>
+                              setEditingSchedule((prev) => ({
+                                ...prev,
+                                startDate: e.target.value,
+                              }))
+                            }
+                          />
+                          <Input
+                            type="date"
+                            value={editingSchedule.endDate}
+                            onChange={(e) =>
+                              setEditingSchedule((prev) => ({
+                                ...prev,
+                                endDate: e.target.value,
+                              }))
+                            }
+                          />
+                          <select
+                            className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            value={editingSchedule.activityType}
+                            onChange={(e) =>
+                              setEditingSchedule((prev) => ({
+                                ...prev,
+                                activityType: e.target.value,
+                              }))
+                            }
+                          >
+                            {Object.entries(ACTIVITY_TYPE_HEBREW).map(([value, label]) => (
+                              <option key={value} value={value}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={editingSchedule.requiredPersonnelCount}
+                            onChange={(e) =>
+                              setEditingSchedule((prev) => ({
+                                ...prev,
+                                requiredPersonnelCount: Number(e.target.value),
+                              }))
+                            }
+                          />
+                          <select
+                            className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            value={editingSchedule.scope}
+                            onChange={(e) =>
+                              setEditingSchedule((prev) => {
+                                const scope = e.target.value as
+                                  | "ALL_DEPARTMENT"
+                                  | "SPECIFIC_USERS";
+                                return {
+                                  ...prev,
+                                  scope,
+                                  selectedUsers:
+                                    scope === "ALL_DEPARTMENT"
+                                      ? []
+                                      : prev.selectedUsers,
+                                };
+                              })
+                            }
+                          >
+                            <option value="ALL_DEPARTMENT">כל המחלקה</option>
+                            <option value="SPECIFIC_USERS">משתמשים ספציפיים</option>
+                          </select>
+                          <Textarea
+                            className="md:col-span-3"
+                            value={editingSchedule.notes}
+                            onChange={(e) =>
+                              setEditingSchedule((prev) => ({
+                                ...prev,
+                                notes: e.target.value,
+                              }))
+                            }
+                            placeholder="הערות"
+                          />
+                        </div>
+                        {editingSchedule.scope === "SPECIFIC_USERS" && (
+                          <div className="rounded-md border p-3">
+                            <div className="mb-2 text-sm font-medium">
+                              בחירת אנשי מחלקה מחויבים לאירוע
+                            </div>
+                            <div className="grid gap-2 md:grid-cols-2">
+                              {schedulableUsers.map((member) => {
+                                const memberId = String(member._id);
+                                const isChecked =
+                                  editingSchedule.selectedUsers.includes(memberId);
+                                return (
+                                  <label
+                                    key={memberId}
+                                    className="flex items-center gap-2 rounded border bg-white px-3 py-2 text-sm"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={(e) =>
+                                        setEditingSchedule((prev) => ({
+                                          ...prev,
+                                          selectedUsers: e.target.checked
+                                            ? [...prev.selectedUsers, memberId]
+                                            : prev.selectedUsers.filter(
+                                                (id) => id !== memberId
+                                              ),
+                                        }))
+                                      }
+                                    />
+                                    <span>
+                                      {member.name} (
+                                      {member.role === "COMMANDER" ? "מפקד" : "חייל"})
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={() => saveEditSchedule(String(event._id))}>
+                            שמור
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={cancelEditSchedule}>
+                            בטל
+                          </Button>
+                        </div>
                       </div>
+                    ) : (
+                      <>
+                        <div className="font-medium">
+                          {ACTIVITY_TYPE_HEBREW[event.activityType as keyof typeof ACTIVITY_TYPE_HEBREW]}
+                        </div>
+                        <div>
+                          {new Date(event.startDate).toLocaleDateString("he-IL")} -{" "}
+                          {new Date(event.endDate).toLocaleDateString("he-IL")}
+                        </div>
+                        <div>נדרש: {event.requiredPersonnelCount}</div>
+                        <div>היקף: {event.scope === "ALL_DEPARTMENT" ? "כל המחלקה" : "נבחרים בלבד"}</div>
+                        {event.scope === "SPECIFIC_USERS" && (
+                          <div className="text-xs text-muted-foreground">
+                            חל על{" "}
+                            {Array.isArray(event.selectedUsers)
+                              ? event.selectedUsers.length
+                              : 0}{" "}
+                            אנשים
+                          </div>
+                        )}
+                        {isCommander && (
+                          <div className="mt-3 flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => startEditSchedule(event)}
+                            >
+                              ערוך
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => removeSchedule(String(event._id))}
+                            >
+                              מחק
+                            </Button>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 ))}
@@ -594,27 +1068,27 @@ export default function DashboardPage() {
                     {newSchedule.scope === "SPECIFIC_USERS" && (
                       <div className="rounded-md border p-3 md:col-span-3">
                         <div className="mb-2 text-sm font-medium">
-                          בחירת חיילים מחויבים לאירוע
+                          בחירת אנשי מחלקה מחויבים לאירוע
                         </div>
-                        {soldiers.length === 0 ? (
+                        {schedulableUsers.length === 0 ? (
                           <div className="text-sm text-muted-foreground">
-                            לא קיימים חיילים במחלקה כרגע
+                            לא קיימים אנשי מחלקה זמינים כרגע
                           </div>
                         ) : (
                           <div className="space-y-2">
                             <div className="text-xs text-muted-foreground">
-                              נבחרו {newSchedule.selectedUsers.length} חיילים
+                              נבחרו {newSchedule.selectedUsers.length} אנשים
                             </div>
                             <div className="grid gap-2 md:grid-cols-2">
-                              {soldiers.map((soldier) => {
-                                const soldierId = String(soldier._id);
+                              {schedulableUsers.map((member) => {
+                                const memberId = String(member._id);
                                 const isChecked =
                                   newSchedule.selectedUsers.includes(
-                                    soldierId
+                                    memberId
                                   );
                                 return (
                                   <label
-                                    key={soldierId}
+                                    key={memberId}
                                     className="flex items-center gap-2 rounded border bg-white px-3 py-2 text-sm"
                                   >
                                     <input
@@ -626,15 +1100,18 @@ export default function DashboardPage() {
                                           selectedUsers: e.target.checked
                                             ? [
                                                 ...prev.selectedUsers,
-                                                soldierId,
+                                                memberId,
                                               ]
                                             : prev.selectedUsers.filter(
-                                                (id) => id !== soldierId
+                                                (id) => id !== memberId
                                               ),
                                         }));
                                       }}
                                     />
-                                    <span>{soldier.name}</span>
+                                    <span>
+                                      {member.name} (
+                                      {member.role === "COMMANDER" ? "מפקד" : "חייל"})
+                                    </span>
                                   </label>
                                 );
                               })}
