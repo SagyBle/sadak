@@ -24,20 +24,19 @@ export async function GET(request: NextRequest) {
       db.listDailyOverridesByDepartment(session.departmentId!),
     ]);
 
-    const activeEvents = schedules.filter((event: any) => {
-      const target = normalizeDay(targetDate);
-      return (
-        target >= normalizeDay(new Date(event.startDate)) &&
-        target <= normalizeDay(new Date(event.endDate))
-      );
-    });
-    const hasActiveSchedule = activeEvents.length > 0;
+    const filteredLeaves = leaves.filter((item: any) => item.user);
+    const filteredOverrides = overrides.filter((item: any) => item.user);
 
-    const usersById = new Map<string, any>(
-      users.map((user: any) => [String(user._id), user])
-    );
+    const buildDayRow = (user: any, date: Date) => {
+      const activeEvents = schedules.filter((event: any) => {
+        const target = normalizeDay(date);
+        return (
+          target >= normalizeDay(new Date(event.startDate)) &&
+          target <= normalizeDay(new Date(event.endDate))
+        );
+      });
+      const hasActiveSchedule = activeEvents.length > 0;
 
-    const rows = users.map((user: any) => {
       if (!hasActiveSchedule) {
         return {
           id: user._id,
@@ -72,11 +71,11 @@ export async function GET(request: NextRequest) {
       }
 
       const status = resolveDailyStatus({
-        date: targetDate,
+        date,
         userId,
         events: schedules as any,
-        leaves: leaves.filter((item: any) => item.user),
-        overrides: overrides.filter((item: any) => item.user),
+        leaves: filteredLeaves,
+        overrides: filteredOverrides,
       });
 
       const reason =
@@ -97,11 +96,39 @@ export async function GET(request: NextRequest) {
         source: status.source,
         isException: status.source !== "BASELINE",
       };
+    };
+
+    const activeEvents = schedules.filter((event: any) => {
+      const target = normalizeDay(targetDate);
+      return (
+        target >= normalizeDay(new Date(event.startDate)) &&
+        target <= normalizeDay(new Date(event.endDate))
+      );
     });
+    const hasActiveSchedule = activeEvents.length > 0;
+
+    const usersById = new Map<string, any>(
+      users.map((user: any) => [String(user._id), user])
+    );
+
+    const rows = users.map((user: any) => buildDayRow(user, targetDate));
+    const previousDate = new Date(targetDate);
+    previousDate.setDate(previousDate.getDate() - 1);
+    const previousRowsById = new Map<string, any>(
+      users.map((user: any) => [String(user._id), buildDayRow(user, previousDate)])
+    );
 
     const inBase = rows.filter((item) => item.bucket === "IN_BASE");
     const home = rows.filter((item) => item.bucket === "HOME");
     const notEnlisted = rows.filter((item) => item.bucket === "NOT_ENLISTED");
+    const returningToday = rows.filter((item) => {
+      const previous = previousRowsById.get(String(item.id));
+      return previous?.bucket === "HOME" && item.bucket === "IN_BASE";
+    });
+    const leavingToday = rows.filter((item) => {
+      const previous = previousRowsById.get(String(item.id));
+      return previous?.bucket === "IN_BASE" && item.bucket === "HOME";
+    });
 
     const pendingLeaveCount = leaves.filter((item: any) => {
       if (!item.user || item.status !== "PENDING") return false;
@@ -125,6 +152,8 @@ export async function GET(request: NextRequest) {
         notEnlistedCount: notEnlisted.length,
         exceptionsCount: rows.filter((item) => item.isException).length,
         pendingLeaveCount,
+        returningTodayCount: returningToday.length,
+        leavingTodayCount: leavingToday.length,
         totalRequired,
         availableNow: inBase.length,
         hasActiveSchedule,
@@ -132,6 +161,10 @@ export async function GET(request: NextRequest) {
       inBase,
       home,
       notEnlisted,
+      transitions: {
+        returningToday,
+        leavingToday,
+      },
     });
   } catch (error) {
     return BackendApiService.handleError(error);

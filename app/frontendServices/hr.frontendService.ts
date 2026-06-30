@@ -14,6 +14,10 @@ class HrFrontendService {
       inBase: any[];
       home: any[];
       notEnlisted: any[];
+      transitions: {
+        returningToday: any[];
+        leavingToday: any[];
+      };
     }>(`/personnel/daily-status${query}`);
   }
 

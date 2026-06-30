@@ -53,6 +53,8 @@ type DailyStatusResponse = {
     notEnlistedCount: number;
     exceptionsCount: number;
     pendingLeaveCount: number;
+    returningTodayCount: number;
+    leavingTodayCount: number;
     totalRequired: number;
     availableNow: number;
     hasActiveSchedule: boolean;
@@ -60,6 +62,10 @@ type DailyStatusResponse = {
   inBase: DailyStatusItem[];
   home: DailyStatusItem[];
   notEnlisted: DailyStatusItem[];
+  transitions: {
+    returningToday: DailyStatusItem[];
+    leavingToday: DailyStatusItem[];
+  };
 };
 
 const getTodayDateInputValue = () => new Date().toISOString().slice(0, 10);
@@ -604,6 +610,12 @@ export default function DashboardPage() {
                   <div className="rounded border bg-white p-3">
                     בקשות ממתינות להיום: {dailyStatus?.summary.pendingLeaveCount ?? 0}
                   </div>
+                  <div className="rounded border bg-emerald-50 p-3">
+                    חוזרים היום: {dailyStatus?.summary.returningTodayCount ?? 0}
+                  </div>
+                  <div className="rounded border bg-orange-50 p-3">
+                    יוצאים היום: {dailyStatus?.summary.leavingTodayCount ?? 0}
+                  </div>
                 </div>
                 {dailyStatus?.summary.hasActiveSchedule === false && (
                   <div className="rounded border border-slate-300 bg-slate-50 p-3 text-sm">
@@ -691,6 +703,60 @@ export default function DashboardPage() {
                         <div className="text-xs">סיבה: {item.reason}</div>
                         <div className="text-xs text-muted-foreground">
                           סטטוס: {item.statusText}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>חיילים שצריכים לחזור מהבית היום</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {(dailyStatus?.transitions?.returningToday || []).length === 0 ? (
+                    <div className="rounded border bg-white p-3 text-sm text-muted-foreground">
+                      אין חיילים שאמורים לחזור היום מהבית
+                    </div>
+                  ) : (
+                    (dailyStatus?.transitions?.returningToday || []).map((item) => (
+                      <div
+                        key={`returning-${item.id}`}
+                        className="rounded border bg-white p-3 text-sm"
+                      >
+                        <div className="font-medium">{item.name}</div>
+                        <div className="text-xs">סטטוס היום: {item.statusText}</div>
+                        <div className="text-xs text-muted-foreground">
+                          מקור: {sourceHebrew[item.source]}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>חיילים שצריכים לצאת הביתה היום</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {(dailyStatus?.transitions?.leavingToday || []).length === 0 ? (
+                    <div className="rounded border bg-white p-3 text-sm text-muted-foreground">
+                      אין חיילים שאמורים לצאת היום הביתה
+                    </div>
+                  ) : (
+                    (dailyStatus?.transitions?.leavingToday || []).map((item) => (
+                      <div
+                        key={`leaving-${item.id}`}
+                        className="rounded border bg-white p-3 text-sm"
+                      >
+                        <div className="font-medium">{item.name}</div>
+                        <div className="text-xs">סטטוס היום: {item.statusText}</div>
+                        <div className="text-xs text-muted-foreground">
+                          מקור: {sourceHebrew[item.source]}
                         </div>
                       </div>
                     ))
