@@ -31,6 +31,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [godPassword, setGodPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
 
   const users = useMemo(
     () => departments.find((dep) => dep.id === departmentId)?.users || [],
@@ -44,9 +45,16 @@ export default function LoginPage() {
     }
 
     const load = async () => {
-      const response = await AdminFrontendService.getDepartmentsAndUsers();
-      if (response.success && response.data) {
-        setDepartments(response.data.departments);
+      setIsInitialLoading(true);
+      try {
+        const response = await AdminFrontendService.getDepartmentsAndUsers();
+        if (response.success && response.data) {
+          setDepartments(response.data.departments);
+          return;
+        }
+        toast.error(response.error || "טעינת נתוני התחברות נכשלה");
+      } finally {
+        setIsInitialLoading(false);
       }
     };
     load();
@@ -87,6 +95,19 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  if (isInitialLoading) {
+    return (
+      <main className="min-h-screen bg-slate-50 py-10 px-4">
+        <div className="mx-auto flex min-h-[70vh] max-w-5xl items-center justify-center">
+          <div className="flex flex-col items-center gap-3 text-slate-700">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
+            <p className="text-sm">טוען נתוני התחברות...</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-slate-50 py-10 px-4">
