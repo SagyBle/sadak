@@ -132,6 +132,39 @@ class ApiService {
     }
   }
 
+  static async patch<T>(endpoint: string, body: any): Promise<ApiResponse<T>> {
+    try {
+      const token = this.getToken();
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(`${this.baseUrl}${endpoint}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json();
+
+      return {
+        success: response.ok,
+        data: data.data,
+        error: data.error,
+        message: data.message,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Request failed",
+      };
+    }
+  }
+
   static async delete<T>(endpoint: string, body?: any): Promise<ApiResponse<T>> {
     try {
       const token = this.getToken();

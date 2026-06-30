@@ -30,6 +30,8 @@ export async function POST(request: NextRequest) {
       date: string;
       requiredPersonnel: number;
       availableBeforeApproval: number;
+      openRequests: number;
+      approvedRequests: number;
       openOrApprovedRequests: number;
       warning: boolean;
     }> = [];
@@ -63,15 +65,22 @@ export async function POST(request: NextRequest) {
         }).isPresent
       ).length;
 
-      const openOrApprovedRequests = leaves.filter((leave: any) => {
+      const overlappingRequests = leaves.filter((leave: any) => {
         if (!leave.user) return false;
         if (leave.user._id?.toString?.() === targetUserId) return false;
         const target = dayValue(date);
         const inRange =
           target >= dayValue(new Date(leave.startDate)) &&
           target <= dayValue(new Date(leave.endDate));
-        return inRange && (leave.status === "PENDING" || leave.status === "APPROVED");
-      }).length;
+        return inRange;
+      });
+      const openRequests = overlappingRequests.filter(
+        (leave: any) => leave.status === "PENDING"
+      ).length;
+      const approvedRequests = overlappingRequests.filter(
+        (leave: any) => leave.status === "APPROVED"
+      ).length;
+      const openOrApprovedRequests = openRequests + approvedRequests;
 
       const warning = availableBeforeApproval - 1 < requiredPersonnel;
 
@@ -79,6 +88,8 @@ export async function POST(request: NextRequest) {
         date: date.toISOString(),
         requiredPersonnel,
         availableBeforeApproval,
+        openRequests,
+        approvedRequests,
         openOrApprovedRequests,
         warning,
       });

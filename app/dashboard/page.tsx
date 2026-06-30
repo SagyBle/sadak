@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { Calendar } from "@/components/ui/calendar";
 import { useAuth } from "@/app/contexts/AuthContext";
 import AdminFrontendService from "@/app/frontendServices/admin.frontendService";
 import HrFrontendService from "@/app/frontendServices/hr.frontendService";
@@ -23,8 +24,16 @@ import {
   HEBREW_TABS,
   LEAVE_STATUS_HEBREW,
 } from "@/app/lib/hr.constants";
+import { he } from "date-fns/locale";
 
 type TabKey = "personnel" | "schedule" | "leave" | "duties";
+type LeaveApprovalDayIntel = {
+  date: string;
+  requiredPersonnel: number;
+  availableBeforeApproval: number;
+  openRequests: number;
+  warning: boolean;
+};
 
 const TAB_OPTIONS: Array<{ key: TabKey; label: string }> = [
   { key: "personnel", label: HEBREW_TABS.PERSONNEL },
@@ -45,6 +54,9 @@ export default function DashboardPage() {
   const [duties, setDuties] = useState<any[]>([]);
   const [leaveFilter, setLeaveFilter] = useState("");
   const [leaveIntelligence, setLeaveIntelligence] = useState<any[]>([]);
+  const [leaveApprovalIntelByRequest, setLeaveApprovalIntelByRequest] =
+    useState<Record<string, LeaveApprovalDayIntel[] | null>>({});
+  const [calendarMonth, setCalendarMonth] = useState(new Date());
 
   const [newUser, setNewUser] = useState({ name: "", role: "SOLDIER" as "SOLDIER" | "COMMANDER" });
   const [newSchedule, setNewSchedule] = useState({
@@ -52,7 +64,8 @@ export default function DashboardPage() {
     endDate: "",
     activityType: "TRAINING",
     requiredPersonnelCount: 0,
-    scope: "ALL_DEPARTMENT",
+    scope: "ALL_DEPARTMENT" as "ALL_DEPARTMENT" | "SPECIFIC_USERS",
+    selectedUsers: [] as string[],
     notes: "",
   });
   const [newLeave, setNewLeave] = useState({
@@ -71,6 +84,10 @@ export default function DashboardPage() {
   });
 
   const isCommander = session?.role === "COMMANDER";
+  const soldiers = useMemo(
+    () => users.filter((user) => user.role === "SOLDIER"),
+    [users]
+  );
 
   const loadAll = async () => {
     const [summaryRes, rosterRes, usersRes, schedulesRes, leaveRes, dutiesRes] =
@@ -118,21 +135,31 @@ export default function DashboardPage() {
     });
   }, [schedules]);
 
-  const monthlyCalendar = useMemo(() => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth();
+  const monthlyCalendarModifiers = useMemo(() => {
+    const year = calendarMonth.getFullYear();
+    const month = calendarMonth.getMonth();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    return Array.from({ length: daysInMonth }).map((_, index) => {
-      const day = new Date(year, month, index + 1);
+    const homeDays: Date[] = [];
+    const operationalDays: Date[] = [];
+
+    for (let dayOfMonth = 1; dayOfMonth <= daysInMonth; dayOfMonth += 1) {
+      const day = new Date(year, month, dayOfMonth);
       const active = schedules.find((event) => {
         const start = new Date(event.startDate);
         const end = new Date(event.endDate);
         return day >= start && day <= end;
       });
-      return { day, active };
-    });
-  }, [schedules]);
+
+      if (!active) continue;
+      if (active.activityType === "HOME") {
+        homeDays.push(day);
+      } else {
+        operationalDays.push(day);
+      }
+    }
+
+    return { homeDays, operationalDays };
+  }, [schedules, calendarMonth]);
 
   const dutyOverview = useMemo(() => {
     const map = new Map<string, { name: string; KITCHEN: number; MAINTENANCE_RASAP: number; OTHER: number }>();
@@ -156,6 +183,59 @@ export default function DashboardPage() {
       request.user?.name?.toLowerCase?.().includes(value)
     );
   }, [leaveRequests, leaveFilter]);
+
+  useEffect(() => {
+    if (tab !== "leave") return;
+    const pendingRequests = leaveRequests.filter(
+      (request) =>
+        request.status === "PENDING" &&
+        request.user &&
+        request.startDate &&
+        request.endDate
+    );
+
+    if (pendingRequests.length === 0) {
+      setLeaveApprovalIntelByRequest({});
+      return;
+    }
+
+    const loadingMap = pendingRequests.reduce<
+      Record<string, LeaveApprovalDayIntel[] | null>
+    >((acc, request) => {
+      acc[request._id] = null;
+      return acc;
+    }, {});
+    setLeaveApprovalIntelByRequest(loadingMap);
+
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        pendingRequests.map(async (request) => {
+          const targetUserId = String(request.user?._id || request.user || "");
+          const response = await HrFrontendService.getLeaveIntelligence({
+            userId: targetUserId,
+            startDate: request.startDate,
+            endDate: request.endDate,
+          });
+          return [
+            request._id,
+            response.success
+              ? ((response.data?.days || []) as LeaveApprovalDayIntel[])
+              : [],
+          ] as const;
+        })
+      );
+
+      if (cancelled) return;
+      setLeaveApprovalIntelByRequest(
+        Object.fromEntries(entries) as Record<string, LeaveApprovalDayIntel[]>
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [leaveRequests, tab]);
 
   const applyOverride = async (userId: string) => {
     const statusText = window.prompt("הזן סטטוס חריג יומי");
@@ -187,12 +267,30 @@ export default function DashboardPage() {
 
   const submitSchedule = async (event: React.FormEvent) => {
     event.preventDefault();
+
+    if (
+      newSchedule.scope === "SPECIFIC_USERS" &&
+      newSchedule.selectedUsers.length === 0
+    ) {
+      toast.error("בבחירת חיילים ספציפיים חובה לבחור לפחות חייל אחד");
+      return;
+    }
+
     const response = await HrFrontendService.createSchedule(newSchedule);
     if (!response.success) {
       toast.error(response.error || "יצירת אירוע לו״ז נכשלה");
       return;
     }
     toast.success("אירוע לו״ז נוסף");
+    setNewSchedule({
+      startDate: "",
+      endDate: "",
+      activityType: "TRAINING",
+      requiredPersonnelCount: 0,
+      scope: "ALL_DEPARTMENT",
+      selectedUsers: [],
+      notes: "",
+    });
     loadAll();
   };
 
@@ -213,6 +311,15 @@ export default function DashboardPage() {
       return;
     }
     toast.success("בקשת יציאה נוצרה");
+    setNewLeave({
+      userId: "",
+      startDate: "",
+      endDate: "",
+      reason: "",
+      requestType: "LEAVE",
+      notes: "",
+    });
+    setLeaveIntelligence([]);
     loadAll();
   };
 
@@ -310,20 +417,23 @@ export default function DashboardPage() {
                 <CardTitle>לוח חודשי</CardTitle>
                 <CardDescription>ירוק = בסיס/מבצעי, כחול = בית</CardDescription>
               </CardHeader>
-              <CardContent className="grid grid-cols-7 gap-2">
-                {monthlyCalendar.map((entry) => {
-                  const isHome = entry.active?.activityType === "HOME";
-                  return (
-                    <div
-                      key={entry.day.toISOString()}
-                      className={`rounded border p-2 text-xs ${
-                        !entry.active ? "bg-white" : isHome ? "bg-blue-100" : "bg-green-100"
-                      }`}
-                    >
-                      {entry.day.getDate()}
-                    </div>
-                  );
-                })}
+              <CardContent>
+                <Calendar
+                  locale={he}
+                  dir="rtl"
+                  month={calendarMonth}
+                  onMonthChange={setCalendarMonth}
+                  modifiers={{
+                    homeDay: monthlyCalendarModifiers.homeDays,
+                    operationalDay: monthlyCalendarModifiers.operationalDays,
+                  }}
+                  modifiersClassNames={{
+                    homeDay:
+                      "bg-blue-100 text-blue-900 hover:bg-blue-200 focus:bg-blue-200",
+                    operationalDay:
+                      "bg-green-100 text-green-900 hover:bg-green-200 focus:bg-green-200",
+                  }}
+                />
               </CardContent>
             </Card>
 
@@ -403,6 +513,15 @@ export default function DashboardPage() {
                     </div>
                     <div>נדרש: {event.requiredPersonnelCount}</div>
                     <div>היקף: {event.scope === "ALL_DEPARTMENT" ? "כל המחלקה" : "נבחרים בלבד"}</div>
+                    {event.scope === "SPECIFIC_USERS" && (
+                      <div className="text-xs text-muted-foreground">
+                        חל על{" "}
+                        {Array.isArray(event.selectedUsers)
+                          ? event.selectedUsers.length
+                          : 0}{" "}
+                        חיילים
+                      </div>
+                    )}
                   </div>
                 ))}
               </CardContent>
@@ -453,11 +572,77 @@ export default function DashboardPage() {
                     <select
                       className="rounded-md border border-input bg-background px-3 py-2 text-sm"
                       value={newSchedule.scope}
-                      onChange={(e) => setNewSchedule((prev) => ({ ...prev, scope: e.target.value }))}
+                      onChange={(e) =>
+                        setNewSchedule((prev) => {
+                          const scope = e.target.value as
+                            | "ALL_DEPARTMENT"
+                            | "SPECIFIC_USERS";
+                          return {
+                            ...prev,
+                            scope,
+                            selectedUsers:
+                              scope === "ALL_DEPARTMENT"
+                                ? []
+                                : prev.selectedUsers,
+                          };
+                        })
+                      }
                     >
                       <option value="ALL_DEPARTMENT">כל המחלקה</option>
                       <option value="SPECIFIC_USERS">משתמשים ספציפיים</option>
                     </select>
+                    {newSchedule.scope === "SPECIFIC_USERS" && (
+                      <div className="rounded-md border p-3 md:col-span-3">
+                        <div className="mb-2 text-sm font-medium">
+                          בחירת חיילים מחויבים לאירוע
+                        </div>
+                        {soldiers.length === 0 ? (
+                          <div className="text-sm text-muted-foreground">
+                            לא קיימים חיילים במחלקה כרגע
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="text-xs text-muted-foreground">
+                              נבחרו {newSchedule.selectedUsers.length} חיילים
+                            </div>
+                            <div className="grid gap-2 md:grid-cols-2">
+                              {soldiers.map((soldier) => {
+                                const soldierId = String(soldier._id);
+                                const isChecked =
+                                  newSchedule.selectedUsers.includes(
+                                    soldierId
+                                  );
+                                return (
+                                  <label
+                                    key={soldierId}
+                                    className="flex items-center gap-2 rounded border bg-white px-3 py-2 text-sm"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={(e) => {
+                                        setNewSchedule((prev) => ({
+                                          ...prev,
+                                          selectedUsers: e.target.checked
+                                            ? [
+                                                ...prev.selectedUsers,
+                                                soldierId,
+                                              ]
+                                            : prev.selectedUsers.filter(
+                                                (id) => id !== soldierId
+                                              ),
+                                        }));
+                                      }}
+                                    />
+                                    <span>{soldier.name}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <Textarea
                       placeholder="הערות"
                       value={newSchedule.notes}
@@ -502,6 +687,29 @@ export default function DashboardPage() {
                         <Button size="sm" variant="destructive" onClick={() => updateLeaveStatus(request._id, "REJECTED")}>
                           דחה
                         </Button>
+                      </div>
+                    )}
+                    {isCommander && request.status === "PENDING" && (
+                      <div className="mt-2 rounded border bg-slate-50 p-2 text-xs space-y-1">
+                        <div className="font-medium">מצב סד״כ עבור אישור הבקשה</div>
+                        {leaveApprovalIntelByRequest[request._id] === null && (
+                          <div className="text-muted-foreground">טוען נתונים...</div>
+                        )}
+                        {(leaveApprovalIntelByRequest[request._id] || []).map((day) => (
+                          <div
+                            key={day.date}
+                            className={`rounded border p-2 ${
+                              day.warning ? "border-red-500 bg-red-50" : "bg-white"
+                            }`}
+                          >
+                            <div>
+                              תאריך: {new Date(day.date).toLocaleDateString("he-IL")}
+                            </div>
+                            <div>כמות נדרשת: {day.requiredPersonnel}</div>
+                            <div>כמות זמינה כרגע: {day.availableBeforeApproval}</div>
+                            <div>בקשות פתוחות נוספות: {day.openRequests}</div>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>

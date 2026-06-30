@@ -39,7 +39,7 @@ class HrFrontendService {
   }
 
   static updateLeaveRequest(payload: { id: string; status: string; notes?: string }) {
-    return ApiService.put<{ request: any }>("/leave-requests", payload);
+    return ApiService.patch<{ request: any }>("/leave-requests", payload);
   }
 
   static getLeaveIntelligence(payload: {
