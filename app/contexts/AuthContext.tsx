@@ -8,9 +8,13 @@ import {
   ReactNode,
 } from "react";
 import AdminFrontendService from "@/app/frontendServices/admin.frontendService";
+import type { SessionUser } from "../lib/hr.types";
 
 interface AuthContextType {
-  isAdmin: boolean;
+  session: SessionUser | null;
+  isAuthenticated: boolean;
+  isCommander: boolean;
+  isGodMode: boolean;
   isLoading: boolean;
   checkAuth: () => Promise<void>;
   logout: () => void;
@@ -19,15 +23,16 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [session, setSession] = useState<SessionUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const checkAuth = async () => {
     try {
       const response = await AdminFrontendService.verifyToken();
-      setIsAdmin(response.success && response.data?.isValid === true);
+      const valid = response.success && response.data?.isValid === true;
+      setSession(valid ? response.data?.session || null : null);
     } catch (error) {
-      setIsAdmin(false);
+      setSession(null);
     } finally {
       setIsLoading(false);
     }
@@ -35,7 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     AdminFrontendService.logout();
-    setIsAdmin(false);
+    setSession(null);
   };
 
   useEffect(() => {
@@ -43,7 +48,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ isAdmin, isLoading, checkAuth, logout }}>
+    <AuthContext.Provider
+      value={{
+        session,
+        isAuthenticated: Boolean(session),
+        isCommander: session?.role === "COMMANDER",
+        isGodMode: session?.role === "GOD",
+        isLoading,
+        checkAuth,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

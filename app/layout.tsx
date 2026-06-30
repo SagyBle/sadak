@@ -7,8 +7,8 @@ import { AuthProvider } from "./contexts/AuthContext";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "טורניר הפינג פונג פלוגה ב׳",
-  description: "הרשמו לטורנירים ועקבו אחרי המשחקים שלכם",
+  title: "מערכת ניהול כ״א ולו״ז מחלקתי",
+  description: "מערכת ניהול כוח אדם, לו״ז, בקשות יציאה ותורנויות",
 };
 
 export default function RootLayout({
@@ -17,7 +17,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="he" dir="rtl">
       <body className={inter.className}>
         <AuthProvider>
           {children}

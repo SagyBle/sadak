@@ -2,8 +2,9 @@ import jwt from "jsonwebtoken";
 
 interface UserDetails {
   userId: string;
-  email: string;
+  name: string;
   role: string;
+  departmentId?: string;
 }
 
 class JWTUtils {
@@ -13,8 +14,9 @@ class JWTUtils {
   static generateToken(userDetails: UserDetails) {
     const payload = {
       userId: userDetails.userId,
-      email: userDetails.email,
+      name: userDetails.name,
       role: userDetails.role,
+      departmentId: userDetails.departmentId,
     };
 
     const token = jwt.sign(payload, this.JWT_SECRET, {

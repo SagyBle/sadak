@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,113 +15,173 @@ import {
 } from "@/components/ui/card";
 import AdminFrontendService from "@/app/frontendServices/admin.frontendService";
 import { useAuth } from "@/app/contexts/AuthContext";
-import { toast } from "sonner";
-import { ArrowLeft } from "lucide-react";
 
-function LoginForm() {
+type DepartmentOption = {
+  id: string;
+  name: string;
+  users: Array<{ id: string; name: string; role: string }>;
+};
+
+export default function LoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const { checkAuth } = useAuth();
-  const [email, setEmail] = useState("");
+  const { checkAuth, isAuthenticated } = useAuth();
+  const [departments, setDepartments] = useState<DepartmentOption[]>([]);
+  const [departmentId, setDepartmentId] = useState("");
+  const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
+  const [godPassword, setGodPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
+  const users = useMemo(
+    () => departments.find((dep) => dep.id === departmentId)?.users || [],
+    [departments, departmentId]
+  );
 
-    try {
-      const response = await AdminFrontendService.login({ email, password });
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.push("/dashboard");
+      return;
+    }
 
-      if (response.success) {
-        toast.success("התחברת בהצלחה!");
-        await checkAuth(); // Update auth context
-
-        // Get redirectTo from query params, default to /dashboard
-        const redirectTo = searchParams.get("redirectTo") || "/dashboard";
-
-        // Security: Only allow internal routes (must start with /)
-        const safeRedirect = redirectTo.startsWith("/")
-          ? redirectTo
-          : "/dashboard";
-
-        router.push(safeRedirect);
-      } else {
-        toast.error(response.error || "כניסה נכשלה");
+    const load = async () => {
+      const response = await AdminFrontendService.getDepartmentsAndUsers();
+      if (response.success && response.data) {
+        setDepartments(response.data.departments);
       }
-    } catch (error) {
-      toast.error("אירעה שגיאה בהתחברות");
+    };
+    load();
+  }, [isAuthenticated, router]);
+
+  const handleLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    try {
+      const response = await AdminFrontendService.login({ userId, password });
+      if (!response.success) {
+        toast.error(response.error || "התחברות נכשלה");
+        return;
+      }
+
+      await checkAuth();
+      toast.success("התחברת בהצלחה");
+      router.push("/dashboard");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGodLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    try {
+      const response = await AdminFrontendService.godLogin(godPassword);
+      if (!response.success) {
+        toast.error(response.error || "כניסת God Mode נכשלה");
+        return;
+      }
+
+      await checkAuth();
+      toast.success("כניסה ל-God Mode בוצעה בהצלחה");
+      router.push("/god");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 mb-6"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back to Home
-        </Link>
-
+    <main className="min-h-screen bg-slate-50 py-10 px-4">
+      <div className="mx-auto max-w-5xl grid gap-6 md:grid-cols-2">
         <Card>
-          <CardHeader className="text-center">
-            <CardTitle className="text-2xl">Admin Login</CardTitle>
+          <CardHeader>
+            <CardTitle>כניסת חייל/מפקד</CardTitle>
             <CardDescription>
-              Enter your credentials to access the admin dashboard
+              בחר מחלקה, בחר משתמש והזן סיסמה
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleLogin} className="space-y-4">
+            <form className="space-y-4" onSubmit={handleLogin}>
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="admin@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                <Label htmlFor="department">מחלקה</Label>
+                <select
+                  id="department"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={departmentId}
+                  onChange={(e) => {
+                    setDepartmentId(e.target.value);
+                    setUserId("");
+                  }}
                   required
-                />
+                >
+                  <option value="">בחר מחלקה</option>
+                  {departments.map((dep) => (
+                    <option key={dep.id} value={dep.id}>
+                      {dep.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="user">משתמש</Label>
+                <select
+                  id="user"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={userId}
+                  onChange={(e) => setUserId(e.target.value)}
+                  required
+                >
+                  <option value="">בחר משתמש</option>
+                  {users.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.name} ({user.role === "COMMANDER" ? "מפקד" : "חייל"})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">סיסמה</Label>
                 <Input
                   id="password"
                   type="password"
-                  placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  placeholder="הזן סיסמה"
                   required
                 />
               </div>
               <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Logging in..." : "Login"}
+                התחבר
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>God Mode</CardTitle>
+            <CardDescription>
+              כניסה לניהול גלובלי של מחלקות ומשתמשים
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form className="space-y-4" onSubmit={handleGodLogin}>
+              <div className="space-y-2">
+                <Label htmlFor="godPassword">סיסמת מאסטר</Label>
+                <Input
+                  id="godPassword"
+                  type="password"
+                  value={godPassword}
+                  onChange={(e) => setGodPassword(e.target.value)}
+                  placeholder="הזן סיסמת God Mode"
+                  required
+                />
+              </div>
+              <Button type="submit" variant="secondary" className="w-full" disabled={loading}>
+                כניסה ל-God Mode
               </Button>
             </form>
           </CardContent>
         </Card>
       </div>
-    </div>
-  );
-}
-
-export default function LoginPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white flex items-center justify-center">
-          <div className="text-center">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            <p className="text-gray-600 mt-3 text-sm">Loading...</p>
-          </div>
-        </div>
-      }
-    >
-      <LoginForm />
-    </Suspense>
+    </main>
   );
 }

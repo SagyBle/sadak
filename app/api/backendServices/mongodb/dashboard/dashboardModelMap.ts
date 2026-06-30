@@ -1,13 +1,15 @@
-import { PlayerSchema } from "./schemas/player.schema";
-import { TournamentSchema } from "./schemas/tournament.schema";
-import { MatchSchema } from "./schemas/match.schema";
-import { AdminSchema } from "./schemas/admin.schema";
-import { GroupSchema } from "./schemas/group.schema";
+import { DepartmentSchema } from "./schemas/department.schema";
+import { UserSchema } from "./schemas/user.schema";
+import { ScheduleEventSchema } from "./schemas/schedule-event.schema";
+import { LeaveRequestSchema } from "./schemas/leave-request.schema";
+import { DutyLogSchema } from "./schemas/duty-log.schema";
+import { DailyCustomOverrideStatusSchema } from "./schemas/daily-custom-override-status.schema";
 
 export const dashboardModelMap = {
-  Player: PlayerSchema,
-  Tournament: TournamentSchema,
-  Match: MatchSchema,
-  Admin: AdminSchema,
-  Group: GroupSchema,
+  Department: DepartmentSchema,
+  User: UserSchema,
+  ScheduleEvent: ScheduleEventSchema,
+  LeaveRequest: LeaveRequestSchema,
+  DutyLog: DutyLogSchema,
+  DailyCustomOverrideStatus: DailyCustomOverrideStatusSchema,
 } as const;

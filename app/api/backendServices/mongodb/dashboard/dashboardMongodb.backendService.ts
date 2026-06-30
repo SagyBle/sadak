@@ -1,11 +1,12 @@
 import { Model } from "mongoose";
 import MongoDBAbstractService from "../mongodbAbstract.backendService";
 import { dashboardModelMap } from "./dashboardModelMap";
-import type { Player } from "./schemas/player.schema";
-import type { Tournament } from "./schemas/tournament.schema";
-import type { Match } from "./schemas/match.schema";
-import type { Admin } from "./schemas/admin.schema";
-import type { Group } from "./schemas/group.schema";
+import type { Department } from "./schemas/department.schema";
+import type { AppUser } from "./schemas/user.schema";
+import type { ScheduleEvent } from "./schemas/schedule-event.schema";
+import type { LeaveRequest } from "./schemas/leave-request.schema";
+import type { DutyLog } from "./schemas/duty-log.schema";
+import type { DailyCustomOverrideStatus } from "./schemas/daily-custom-override-status.schema";
 
 class DashboardMongoDBService extends MongoDBAbstractService {
   private static instance: DashboardMongoDBService;
@@ -36,137 +37,136 @@ class DashboardMongoDBService extends MongoDBAbstractService {
     }
   }
 
-  // Direct model accessors with proper typing
-  get Player(): Model<Player> {
-    return this.getModel<Player>("Player");
+  get Department(): Model<Department> {
+    return this.getModel<Department>("Department");
   }
 
-  get Tournament(): Model<Tournament> {
-    return this.getModel<Tournament>("Tournament");
+  get User(): Model<AppUser> {
+    return this.getModel<AppUser>("User");
   }
 
-  get Match(): Model<Match> {
-    return this.getModel<Match>("Match");
+  get ScheduleEvent(): Model<ScheduleEvent> {
+    return this.getModel<ScheduleEvent>("ScheduleEvent");
   }
 
-  get Admin(): Model<Admin> {
-    return this.getModel<Admin>("Admin");
+  get LeaveRequest(): Model<LeaveRequest> {
+    return this.getModel<LeaveRequest>("LeaveRequest");
   }
 
-  get Group(): Model<Group> {
-    return this.getModel<Group>("Group");
+  get DutyLog(): Model<DutyLog> {
+    return this.getModel<DutyLog>("DutyLog");
   }
 
-  // Convenience methods for Players
-  public async createPlayer(
-    data: Omit<Player, "_id" | "createdAt" | "updatedAt">
+  get DailyCustomOverrideStatus(): Model<DailyCustomOverrideStatus> {
+    return this.getModel<DailyCustomOverrideStatus>("DailyCustomOverrideStatus");
+  }
+
+  public async createDepartment(
+    data: Omit<Department, "_id" | "createdAt" | "updatedAt">
   ) {
-    return this.create<Player>(this.Player, data);
+    return this.create<Department>(this.Department, data);
   }
 
-  public async findPlayerByEmail(email: string) {
-    return this.Player.findOne({ email }).lean();
+  public async getDepartments() {
+    return this.Department.find({}).sort({ name: 1 }).lean();
   }
 
-  public async getPlayersByStatus(status: "ACTIVE" | "INACTIVE" | "BANNED") {
-    return this.getAll<Player>(this.Player, { status });
+  public async createUser(data: Omit<AppUser, "_id" | "createdAt" | "updatedAt">) {
+    return this.create<AppUser>(this.User, data);
   }
 
-  // Convenience methods for Tournaments
-  public async createTournament(
-    data: Omit<Tournament, "_id" | "createdAt" | "updatedAt">
-  ) {
-    return this.create<Tournament>(this.Tournament, data);
-  }
-
-  public async getPublishedTournaments() {
-    return this.getAll<Tournament>(
-      this.Tournament,
-      { isPublished: true },
-      { sort: { startDate: -1 } }
-    );
-  }
-
-  public async getTournamentById(id: string) {
-    return this.Tournament.findById(id)
-      .populate("players", "name email phoneNumber status")
-      .populate("matches")
-      .populate("winner", "name email")
+  public async getUsersByDepartment(departmentId: string) {
+    return this.User.find({ department: departmentId, isActive: true })
+      .sort({ role: 1, name: 1 })
       .lean();
   }
 
-  // Convenience methods for Matches
-  public async createMatch(
-    data: Omit<Match, "_id" | "createdAt" | "updatedAt">
+  public async getAllUsers() {
+    return this.User.find({}).populate("department", "name").sort({ name: 1 }).lean();
+  }
+
+  public async getUserById(userId: string) {
+    return this.User.findById(userId).populate("department", "name").lean();
+  }
+
+  public async createScheduleEvent(
+    data: Omit<ScheduleEvent, "_id" | "createdAt" | "updatedAt">
   ) {
-    return this.create<Match>(this.Match, data);
+    return this.create<ScheduleEvent>(this.ScheduleEvent, data);
   }
 
-  public async getMatchesByTournament(tournamentId: string) {
-    return this.getAll<Match>(this.Match, { tournament: tournamentId });
-  }
-
-  // Convenience methods for Admin
-  public async createAdmin(
-    data: Omit<Admin, "_id" | "createdAt" | "updatedAt">
-  ) {
-    return this.create<Admin>(this.Admin, data);
-  }
-
-  public async findAdminByEmail(email: string) {
-    return this.Admin.findOne({ email }).lean();
-  }
-
-  // Convenience methods for Groups
-  public async createGroup(
-    data: Omit<Group, "_id" | "createdAt" | "updatedAt">
-  ) {
-    return this.create<Group>(this.Group, data);
-  }
-
-  public async getGroupsByTournament(tournamentId: string) {
-    return this.Group.find({ tournament: tournamentId })
-      .populate("tournament", "name status")
-      .populate({
-        path: "players.player",
-        select: "name phoneNumber status",
-      })
-      .populate({
-        path: "standings.player",
-        select: "name phoneNumber status",
-      })
-      .populate({
-        path: "matches",
-        populate: [
-          { path: "player1", select: "name phoneNumber" },
-          { path: "player2", select: "name phoneNumber" },
-          { path: "winner", select: "name" },
-        ],
-      })
-      .populate("advancingPlayers", "name phoneNumber")
+  public async getDepartmentSchedule(departmentId: string) {
+    return this.ScheduleEvent.find({ department: departmentId })
+      .sort({ startDate: 1 })
       .lean();
   }
 
-  public async getGroupById(id: string) {
-    return this.Group.findById(id)
-      .populate("tournament", "name status")
+  public async createLeaveRequest(
+    data: Omit<LeaveRequest, "_id" | "createdAt" | "updatedAt">
+  ) {
+    return this.create<LeaveRequest>(this.LeaveRequest, data);
+  }
+
+  public async listLeaveRequestsByDepartment(departmentId: string) {
+    return this.LeaveRequest.find({})
       .populate({
-        path: "players.player",
-        select: "name phoneNumber status",
+        path: "user",
+        match: { department: departmentId },
+        select: "name role department",
       })
+      .sort({ startDate: -1 })
+      .lean();
+  }
+
+  public async updateLeaveRequestStatus(
+    id: string,
+    status: "PENDING" | "APPROVED" | "REJECTED",
+    notes?: string
+  ) {
+    return this.LeaveRequest.findByIdAndUpdate(
+      id,
+      { status, ...(notes !== undefined ? { notes } : {}) },
+      { new: true }
+    ).lean();
+  }
+
+  public async createDutyLog(
+    data: Omit<DutyLog, "_id" | "createdAt" | "updatedAt">
+  ) {
+    return this.create<DutyLog>(this.DutyLog, data);
+  }
+
+  public async listDutyLogsByDepartment(departmentId: string) {
+    return this.DutyLog.find({})
       .populate({
-        path: "standings.player",
-        select: "name phoneNumber status",
+        path: "user",
+        match: { department: departmentId },
+        select: "name role department",
       })
+      .sort({ date: -1 })
+      .lean();
+  }
+
+  public async setDailyOverride(
+    data: Omit<DailyCustomOverrideStatus, "_id" | "createdAt" | "updatedAt">
+  ) {
+    return this.DailyCustomOverrideStatus.findOneAndUpdate(
+      {
+        user: data.user,
+        date: data.date,
+      },
+      { statusText: data.statusText },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
+  }
+
+  public async listDailyOverridesByDepartment(departmentId: string) {
+    return this.DailyCustomOverrideStatus.find({})
       .populate({
-        path: "matches",
-        populate: [
-          { path: "player1", select: "name phoneNumber" },
-          { path: "player2", select: "name phoneNumber" },
-          { path: "winner", select: "name" },
-        ],
+        path: "user",
+        match: { department: departmentId },
+        select: "name role department",
       })
-      .populate("advancingPlayers", "name phoneNumber")
       .lean();
   }
 }

@@ -7,6 +7,32 @@ interface ApiResponse<T> {
 
 class ApiService {
   private static baseUrl = "/api";
+  private static readonly tokenKey = "auth-token";
+  private static readonly tokenCookieName = "auth-token";
+
+  private static getCookie(name: string): string | null {
+    if (typeof document === "undefined") return null;
+    const encodedName = `${encodeURIComponent(name)}=`;
+    const parts = document.cookie.split("; ");
+    const match = parts.find((item) => item.startsWith(encodedName));
+    if (!match) return null;
+    return decodeURIComponent(match.substring(encodedName.length));
+  }
+
+  private static setCookie(name: string, value: string): void {
+    if (typeof document === "undefined") return;
+    const maxAgeSeconds = 60 * 60 * 3; // 3 hours, aligned with JWT expiration.
+    document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(
+      value
+    )}; path=/; max-age=${maxAgeSeconds}; samesite=lax`;
+  }
+
+  private static removeCookie(name: string): void {
+    if (typeof document === "undefined") return;
+    document.cookie = `${encodeURIComponent(
+      name
+    )}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; samesite=lax`;
+  }
 
   static async get<T>(endpoint: string): Promise<ApiResponse<T>> {
     try {
@@ -141,17 +167,21 @@ class ApiService {
 
   static getToken(): string | null {
     if (typeof window === "undefined") return null;
-    return localStorage.getItem("auth-token");
+    const tokenFromStorage = localStorage.getItem(this.tokenKey);
+    if (tokenFromStorage) return tokenFromStorage;
+    return this.getCookie(this.tokenCookieName);
   }
 
   static setToken(token: string): void {
     if (typeof window === "undefined") return;
-    localStorage.setItem("auth-token", token);
+    localStorage.setItem(this.tokenKey, token);
+    this.setCookie(this.tokenCookieName, token);
   }
 
   static removeToken(): void {
     if (typeof window === "undefined") return;
-    localStorage.removeItem("auth-token");
+    localStorage.removeItem(this.tokenKey);
+    this.removeCookie(this.tokenCookieName);
   }
 }
 

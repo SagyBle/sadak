@@ -1,26 +1,28 @@
 import ApiService from "./api.frontendService";
+import type { SessionUser } from "../lib/hr.types";
 
-interface AdminSignupData {
-  name: string;
-  email: string;
-  password: string;
-  role?: "ADMIN" | "SUPER_ADMIN";
-}
-
-interface AdminLoginData {
-  email: string;
+interface UserLoginData {
+  userId: string;
   password: string;
 }
 
 class AdminFrontendService {
-  static async signup(data: AdminSignupData) {
-    const response = await ApiService.post("/admin/signup", data);
-    return response;
+  static async getDepartmentsAndUsers() {
+    return ApiService.get<{
+      departments: Array<{
+        id: string;
+        name: string;
+        users: Array<{ id: string; name: string; role: string }>;
+      }>;
+    }>("/auth/users");
   }
 
-  static async login(data: AdminLoginData) {
-    const response = await ApiService.post<{ token: string }>(
-      "/admin/login",
+  static async login(data: UserLoginData) {
+    const response = await ApiService.post<{
+      token: string;
+      session: SessionUser;
+    }>(
+      "/auth/login",
       data
     );
 
@@ -31,8 +33,23 @@ class AdminFrontendService {
     return response;
   }
 
+  static async godLogin(password: string) {
+    const response = await ApiService.post<{
+      token: string;
+      session: SessionUser;
+    }>("/auth/god-login", { password });
+
+    if (response.success && response.data?.token) {
+      ApiService.setToken(response.data.token);
+    }
+
+    return response;
+  }
+
   static async verifyToken() {
-    return await ApiService.get<{ isValid: boolean }>("/admin/verify");
+    return await ApiService.get<{ isValid: boolean; session?: SessionUser }>(
+      "/auth/verify"
+    );
   }
 
   static logout() {
