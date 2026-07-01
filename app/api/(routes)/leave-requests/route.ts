@@ -48,20 +48,47 @@ export async function PATCH(request: NextRequest) {
     const session = getSessionUser(request);
     const authError = requireDepartmentContext(session);
     if (authError) return authError;
-    if (session.role !== "COMMANDER") {
-      return BackendApiService.errorResponse("רק מפקדים יכולים לאשר/לדחות בקשה", 403);
-    }
 
     const body = await request.json();
-    if (!body.id || !body.status) {
-      return BackendApiService.errorResponse("מזהה בקשה וסטטוס נדרשים", 400);
+    const db = await DashboardMongoDBService.getInstance();
+
+    if (session.role === "COMMANDER" && body.status) {
+      if (!body.id || !body.status) {
+        return BackendApiService.errorResponse("מזהה בקשה וסטטוס נדרשים", 400);
+      }
+
+      const updated = await db.updateLeaveRequestStatus(body.id, body.status, body.notes);
+      return BackendApiService.successResponse({ request: updated }, "סטטוס עודכן");
     }
 
-    const updated = await (
-      await DashboardMongoDBService.getInstance()
-    ).updateLeaveRequestStatus(body.id, body.status, body.notes);
+    if (!body.id || !body.action) {
+      return BackendApiService.errorResponse("מזהה בקשה ופעולה נדרשים", 400);
+    }
 
-    return BackendApiService.successResponse({ request: updated }, "סטטוס עודכן");
+    if (body.action === "CANCEL") {
+      const cancelled = await db.deletePendingLeaveRequestForUser(body.id, session.userId);
+      if (!cancelled) {
+        return BackendApiService.errorResponse("לא נמצאה בקשה ממתינה לביטול", 404);
+      }
+      return BackendApiService.successResponse({ id: body.id }, "הבקשה בוטלה");
+    }
+
+    if (body.action === "EDIT") {
+      const updated = await db.updatePendingLeaveRequestForUser(body.id, session.userId, {
+        startDate: body.startDate ? new Date(body.startDate) : undefined,
+        endDate: body.endDate ? new Date(body.endDate) : undefined,
+        reason: body.reason,
+        requestType: body.requestType,
+        notes: body.notes,
+      } as any);
+
+      if (!updated) {
+        return BackendApiService.errorResponse("לא נמצאה בקשה ממתינה לעדכון", 404);
+      }
+      return BackendApiService.successResponse({ request: updated }, "הבקשה עודכנה");
+    }
+
+    return BackendApiService.errorResponse("פעולה לא נתמכת", 400);
   } catch (error) {
     return BackendApiService.handleError(error);
   }

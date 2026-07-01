@@ -1,4 +1,4 @@
-import { Model } from "mongoose";
+import { Model, Types } from "mongoose";
 import MongoDBAbstractService from "../mongodbAbstract.backendService";
 import { dashboardModelMap } from "./dashboardModelMap";
 import type { Department } from "./schemas/department.schema";
@@ -10,6 +10,7 @@ import type { DailyCustomOverrideStatus } from "./schemas/daily-custom-override-
 
 class DashboardMongoDBService extends MongoDBAbstractService {
   private static instance: DashboardMongoDBService;
+  private static readonly DEFAULT_ORDER_START_DATE = "2026-07-02";
 
   private constructor() {
     super();
@@ -71,6 +72,139 @@ class DashboardMongoDBService extends MongoDBAbstractService {
     return this.Department.find({}).sort({ name: 1 }).lean();
   }
 
+  public async getDepartmentById(id: string) {
+    return this.Department.findById(id).lean();
+  }
+
+  public async ensureDepartmentHasDefaultOrder(id: string) {
+    const department = await this.Department.findById(id);
+    if (!department) return null;
+
+    const hasOrders =
+      Array.isArray((department as any).orders) &&
+      (department as any).orders.length > 0;
+    const activeId = String((department as any).activeOrderId || "");
+    const hasValidActive =
+      hasOrders &&
+      (department as any).orders.some(
+        (item: any) => String(item._id) === activeId
+      );
+    if (hasOrders && hasValidActive) {
+      return department.toObject();
+    }
+
+    const startDate = (department as any).employmentStartDate
+      ? new Date((department as any).employmentStartDate)
+      : new Date(DashboardMongoDBService.DEFAULT_ORDER_START_DATE);
+    const endDate = new Date();
+    const defaultOrderId = new Types.ObjectId();
+
+    if (!hasOrders) {
+      (department as any).orders = [
+        {
+          _id: defaultOrderId,
+          label: "צו ברירת מחדל",
+          startDate,
+          endDate,
+        },
+      ];
+    }
+
+    if (!hasValidActive) {
+      const firstOrderId = (department as any).orders?.[0]?._id || defaultOrderId;
+      (department as any).activeOrderId = firstOrderId;
+    }
+
+    await department.save();
+    return department.toObject();
+  }
+
+  public async updateDepartmentEmploymentStartDate(
+    id: string,
+    employmentStartDate: Date
+  ) {
+    return this.Department.findByIdAndUpdate(
+      id,
+      { employmentStartDate },
+      { new: true }
+    ).lean();
+  }
+
+  public async addDepartmentOrder(
+    departmentId: string,
+    payload: { label: string; startDate: Date; endDate: Date }
+  ) {
+    const department = await this.Department.findById(departmentId);
+    if (!department) return null;
+
+    const orderId = new Types.ObjectId();
+    (department as any).orders = [
+      ...((department as any).orders || []),
+      { _id: orderId, ...payload },
+    ];
+    if (!(department as any).activeOrderId) {
+      (department as any).activeOrderId = orderId;
+    }
+
+    await department.save();
+    return department.toObject();
+  }
+
+  public async updateDepartmentOrder(
+    departmentId: string,
+    orderId: string,
+    payload: Partial<{ label: string; startDate: Date; endDate: Date }>
+  ) {
+    const department = await this.Department.findById(departmentId);
+    if (!department) return null;
+
+    const orders = (department as any).orders || [];
+    const target = orders.find((item: any) => String(item._id) === orderId);
+    if (!target) return null;
+
+    if (payload.label !== undefined) target.label = payload.label;
+    if (payload.startDate !== undefined) target.startDate = payload.startDate;
+    if (payload.endDate !== undefined) target.endDate = payload.endDate;
+
+    await department.save();
+    return department.toObject();
+  }
+
+  public async deleteDepartmentOrder(departmentId: string, orderId: string) {
+    const department = await this.Department.findById(departmentId);
+    if (!department) return null;
+
+    const before = ((department as any).orders || []).length;
+    (department as any).orders = ((department as any).orders || []).filter(
+      (item: any) => String(item._id) !== orderId
+    );
+
+    if (((department as any).orders || []).length === before) {
+      return null;
+    }
+
+    if (String((department as any).activeOrderId || "") === orderId) {
+      (department as any).activeOrderId = (department as any).orders?.[0]?._id || undefined;
+    }
+
+    await department.save();
+    return department.toObject();
+  }
+
+  public async setActiveDepartmentOrder(departmentId: string, orderId: string) {
+    const department = await this.Department.findById(departmentId);
+    if (!department) return null;
+
+    const exists = ((department as any).orders || []).some(
+      (item: any) => String(item._id) === orderId
+    );
+    if (!exists) return null;
+
+    (department as any).activeOrderId = new Types.ObjectId(orderId);
+    await department.save();
+    return department.toObject();
+  }
+
   public async createUser(data: Omit<AppUser, "_id" | "createdAt" | "updatedAt">) {
     return this.create<AppUser>(this.User, data);
   }
@@ -81,12 +215,35 @@ class DashboardMongoDBService extends MongoDBAbstractService {
       .lean();
   }
 
-  public async getAllUsers() {
-    return this.User.find({}).populate("department", "name").sort({ name: 1 }).lean();
+  public async getAllUsers(includeInactive = false) {
+    return this.User.find(includeInactive ? {} : { isActive: true })
+      .populate("department", "name")
+      .sort({ name: 1 })
+      .lean();
   }
 
   public async getUserById(userId: string) {
     return this.User.findById(userId).populate("department", "name").lean();
+  }
+
+  public async updateUserByGod(
+    userId: string,
+    data: Partial<
+      Pick<AppUser, "name" | "role" | "department" | "password">
+    >
+  ) {
+    return this.User.findByIdAndUpdate(userId, data, { new: true })
+      .populate("department", "name")
+      .lean();
+  }
+
+  public async softDeleteUserByGod(userId: string) {
+    const updated = await this.User.findByIdAndUpdate(
+      userId,
+      { isActive: false },
+      { new: true }
+    ).lean();
+    return updated !== null;
   }
 
   public async createScheduleEvent(
@@ -140,6 +297,13 @@ class DashboardMongoDBService extends MongoDBAbstractService {
       .lean();
   }
 
+  public async listLeaveRequestsByUser(userId: string) {
+    return this.LeaveRequest.find({ user: userId })
+      .populate("user", "name role department")
+      .sort({ startDate: -1 })
+      .lean();
+  }
+
   public async updateLeaveRequestStatus(
     id: string,
     status: "PENDING" | "APPROVED" | "REJECTED",
@@ -150,6 +314,29 @@ class DashboardMongoDBService extends MongoDBAbstractService {
       { status, ...(notes !== undefined ? { notes } : {}) },
       { new: true }
     ).lean();
+  }
+
+  public async updatePendingLeaveRequestForUser(
+    id: string,
+    userId: string,
+    data: Partial<Pick<LeaveRequest, "startDate" | "endDate" | "reason" | "requestType" | "notes">>
+  ) {
+    return this.LeaveRequest.findOneAndUpdate(
+      { _id: id, user: userId, status: "PENDING" },
+      data,
+      { new: true }
+    )
+      .populate("user", "name role department")
+      .lean();
+  }
+
+  public async deletePendingLeaveRequestForUser(id: string, userId: string) {
+    const deleted = await this.LeaveRequest.findOneAndDelete({
+      _id: id,
+      user: userId,
+      status: "PENDING",
+    });
+    return deleted !== null;
   }
 
   public async createDutyLog(
@@ -165,6 +352,13 @@ class DashboardMongoDBService extends MongoDBAbstractService {
         match: { department: departmentId },
         select: "name role department",
       })
+      .sort({ date: -1 })
+      .lean();
+  }
+
+  public async listDutyLogsByUser(userId: string) {
+    return this.DutyLog.find({ user: userId })
+      .populate("user", "name role department")
       .sort({ date: -1 })
       .lean();
   }

@@ -25,6 +25,28 @@ class HrFrontendService {
     return ApiService.get<{ roster: any[] }>("/personnel/roster");
   }
 
+  static getSelfStatus(payload?: { month?: string; date?: string; userId?: string }) {
+    const params = new URLSearchParams();
+    if (payload?.month) params.set("month", payload.month);
+    if (payload?.date) params.set("date", payload.date);
+    if (payload?.userId) params.set("userId", payload.userId);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return ApiService.get<{
+      user: any;
+      activeOrder: {
+        id: string;
+        label: string;
+        startDate: string;
+        endDate: string;
+      };
+      calendar: { month: string; days: any[] };
+      dailyStatus: any;
+      overallStatus: any;
+      leaveRequests: any[];
+      duties: any[];
+    }>(`/personnel/self-status${query}`);
+  }
+
   static listUsers() {
     return ApiService.get<{ users: any[] }>("/personnel/users");
   }
@@ -63,6 +85,27 @@ class HrFrontendService {
 
   static updateLeaveRequest(payload: { id: string; status: string; notes?: string }) {
     return ApiService.patch<{ request: any }>("/leave-requests", payload);
+  }
+
+  static updateMyPendingLeaveRequest(payload: {
+    id: string;
+    startDate?: string;
+    endDate?: string;
+    reason?: string;
+    requestType?: "LEAVE" | "STAY_BEHIND";
+    notes?: string;
+  }) {
+    return ApiService.patch<{ request: any }>("/leave-requests", {
+      ...payload,
+      action: "EDIT",
+    });
+  }
+
+  static cancelMyPendingLeaveRequest(id: string) {
+    return ApiService.patch<{ id: string }>("/leave-requests", {
+      id,
+      action: "CANCEL",
+    });
   }
 
   static getLeaveIntelligence(payload: {

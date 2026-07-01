@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import BackendApiService from "@/app/api/backendServices/api.backendService";
 import DashboardMongoDBService from "@/app/api/backendServices/mongodb/dashboard/dashboardMongodb.backendService";
 import { getSessionUser, requireDepartmentContext } from "@/app/api/utils/auth-session.utils";
-import { resolveDailyStatus } from "@/app/lib/hr.logic";
+import { isUserInEventScope, resolveDailyStatus } from "@/app/lib/hr.logic";
 
 const normalizeDay = (value: Date) =>
   new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
@@ -24,15 +24,35 @@ export async function GET(request: NextRequest) {
       db.listDailyOverridesByDepartment(session.departmentId!),
     ]);
 
-    const resolved = users.map((user: any) =>
-      resolveDailyStatus({
-        date: targetDate,
-        userId: user._id.toString(),
-        events: schedules as any,
-        leaves: leaves.filter((item: any) => item.user),
-        overrides: overrides.filter((item: any) => item.user),
-      })
-    );
+    const activeEvents = schedules.filter((event: any) => {
+      const target = normalizeDay(targetDate);
+      return (
+        target >= normalizeDay(new Date(event.startDate)) &&
+        target <= normalizeDay(new Date(event.endDate))
+      );
+    });
+    const hasActiveSchedule = activeEvents.length > 0;
+    const filteredLeaves = leaves.filter((item: any) => item.user);
+    const filteredOverrides = overrides.filter((item: any) => item.user);
+
+    const resolvedStatuses = hasActiveSchedule
+      ? users
+          .map((user: any) => {
+            const userId = String(user._id);
+            const hasUserScopedEvent = activeEvents.some((event: any) =>
+              isUserInEventScope(event, userId)
+            );
+            if (!hasUserScopedEvent) return null;
+            return resolveDailyStatus({
+              date: targetDate,
+              userId,
+              events: schedules as any,
+              leaves: filteredLeaves,
+              overrides: filteredOverrides,
+            });
+          })
+          .filter((status): status is NonNullable<typeof status> => Boolean(status))
+      : [];
 
     const requestsForDate = leaves.filter((item: any) => {
       if (!item.user) return false;
@@ -44,27 +64,24 @@ export async function GET(request: NextRequest) {
 
     const summary = {
       totalRequired: Math.max(
-        ...schedules
-          .filter((event: any) => {
-            const target = normalizeDay(targetDate);
-            return (
-              target >= normalizeDay(new Date(event.startDate)) &&
-              target <= normalizeDay(new Date(event.endDate))
-            );
-          })
-          .map((event: any) => event.requiredPersonnelCount),
+        ...activeEvents.map((event: any) => event.requiredPersonnelCount),
         0
       ),
-      totalPresent: resolved.filter((status) => status.isPresent).length,
-      totalAbsentHome: resolved.filter((status) => !status.isPresent).length,
-      returningToday: requestsForDate.filter(
-        (item: any) =>
-          normalizeDay(new Date(item.endDate)) === normalizeDay(targetDate)
-      ).length,
-      leavingToday: requestsForDate.filter(
-        (item: any) =>
-          normalizeDay(new Date(item.startDate)) === normalizeDay(targetDate)
-      ).length,
+      totalPresent: resolvedStatuses.filter((status) => status.isPresent).length,
+      totalAbsentHome: resolvedStatuses.filter((status) => !status.isPresent).length,
+      returningToday: hasActiveSchedule
+        ? requestsForDate.filter(
+            (item: any) =>
+              normalizeDay(new Date(item.endDate)) === normalizeDay(targetDate)
+          ).length
+        : 0,
+      leavingToday: hasActiveSchedule
+        ? requestsForDate.filter(
+            (item: any) =>
+              normalizeDay(new Date(item.startDate)) === normalizeDay(targetDate)
+          ).length
+        : 0,
+      hasActiveSchedule,
     };
 
     return BackendApiService.successResponse({ summary });

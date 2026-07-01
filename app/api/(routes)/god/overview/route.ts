@@ -11,12 +11,18 @@ export async function GET(request: NextRequest) {
     }
 
     const db = await DashboardMongoDBService.getInstance();
-    const [departments, users] = await Promise.all([
-      db.getDepartments(),
-      db.getAllUsers(),
-    ]);
+    const departments = await db.getDepartments();
+    const ensuredDepartments = await Promise.all(
+      departments.map((department: any) =>
+        db.ensureDepartmentHasDefaultOrder(String(department._id))
+      )
+    );
+    const users = await db.getAllUsers();
 
-    return BackendApiService.successResponse({ departments, users });
+    return BackendApiService.successResponse({
+      departments: ensuredDepartments.filter(Boolean),
+      users,
+    });
   } catch (error) {
     return BackendApiService.handleError(error);
   }
